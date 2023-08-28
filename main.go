@@ -8,14 +8,22 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	baseURL   = "http://localhost:4444" // Replace with your server's URL
-	tokenFile = "token.json"            // Changed to token.json
+	baseURL   = "http://localhost:4444"
+	tokenFile = "token.json" // Changed to token.json
+	tokenDir  = ".flashcardapp"
 )
+
+func getTokenFilePath() string {
+	homeDir, _ := os.UserHomeDir()
+	return filepath.Join(homeDir, tokenDir, tokenFile)
+}
 
 type TokenResponse struct {
 	SessionID          string    `json:"session_id"`
@@ -49,10 +57,10 @@ func main() {
 			case 1:
 				loginResult := login()
 				if loginResult {
-					continue // Successful login, go to the main menu
+					continue
+				} else {
+					continue
 				}
-				// Failed login, continue the loop
-
 			case 2:
 				fmt.Println("Goodbye!")
 				return
@@ -73,11 +81,14 @@ func main() {
 
 		switch choice {
 		case 1:
-			listCards(token)
+			listDecks(token, token.UserID)
 		case 2:
-			addCard(token)
+			addDeck(token.AccessToken, token.UserID)
 		case 3:
 			logout()
+			fmt.Println("Goodbye!")
+			return
+		case 4:
 			fmt.Println("Goodbye!")
 			return
 		default:
@@ -126,46 +137,124 @@ func login() bool {
 	return false
 }
 
-// ...
-
-func readTokenFromFile() (string, error) {
-	tokenData, err := ioutil.ReadFile(tokenFile)
-	if err != nil || len(tokenData) == 0 {
-		return "", errors.New("no token found")
-	}
-
-	var token TokenResponse
-	err = json.Unmarshal(tokenData, &token)
+func readTokenFromFile() (*TokenResponse, error) {
+	tokenPath := getTokenFilePath()
+	tokenData, err := ioutil.ReadFile(tokenPath)
 	if err != nil {
-		return "", errors.New("invalid token format")
+		return nil, errors.New("no token found")
 	}
 
-	return token.AccessToken, nil
+	var tokenResponse TokenResponse
+	err = json.Unmarshal(tokenData, &tokenResponse)
+	if err != nil {
+		return nil, errors.New("invalid token format")
+	}
+
+	return &tokenResponse, nil
 }
 
-func saveTokenToFile(token TokenResponse) error {
-	tokenData, err := json.Marshal(token)
+func saveTokenToFile(tokenResponse TokenResponse) error {
+	tokenPath := getTokenFilePath()
+	tokenData, err := json.Marshal(tokenResponse)
 	if err != nil {
 		return err
 	}
 
-	return ioutil.WriteFile(tokenFile, tokenData, 0644)
+	err = os.MkdirAll(filepath.Dir(tokenPath), 0700)
+	if err != nil {
+		return err
+	}
+
+	return ioutil.WriteFile(tokenPath, tokenData, 0600)
+}
+
+func checkAndRenewToken(tokenResponse *TokenResponse) error {
+	if time.Now().After(tokenResponse.AccessTokenExpire) {
+		req_url := baseURL + "/auth/renewToken"
+
+		payload := url.Values{}
+		payload.Set("refresh_token", tokenResponse.RefreshToken)
+		fmt.Println(tokenResponse.RefreshToken)
+		payloadStr := payload.Encode()
+
+		resp, err := http.Post(req_url, "application/x-www-form-urlencoded", strings.NewReader(payloadStr))
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusCreated {
+			var renewedToken TokenResponse
+			err := json.NewDecoder(resp.Body).Decode(&renewedToken)
+			if err != nil {
+				return err
+			}
+
+			tokenResponse.AccessToken = renewedToken.AccessToken
+			tokenResponse.AccessTokenExpire = renewedToken.AccessTokenExpire
+
+			// Save the updated token to token.json
+			err = saveTokenToFile(*tokenResponse)
+			if err != nil {
+				return err
+			}
+
+			fmt.Println("Token renewed.")
+		} else {
+			return errors.New("token renewal failed with status: " + resp.Status)
+		}
+	}
+	return nil
 }
 
 func displayMenu() {
 	fmt.Println("Main Menu:")
-	fmt.Println("1. My Cards")
-	fmt.Println("2. Add Cards")
+	fmt.Println("1. My Deck")
+	fmt.Println("2. Add Deck")
 	fmt.Println("3. Logout")
+	fmt.Println("4. Exit")
 }
 
-func listCards(token string) {
-	// Use the token to authenticate requests
-	// Send a GET request to retrieve user's cards
-	// Process the response and display the cards
+func listDecks(token *TokenResponse, accountID int) {
+	err := checkAndRenewToken(token)
+	if err != nil {
+		fmt.Println("Error renewing token")
+		return
+	}
+
+	url := baseURL + "/deck/getAll"
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		fmt.Println("Error creating request:", err)
+		return
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	query := req.URL.Query()
+	query.Add("account_id", strconv.Itoa(accountID))
+	req.URL.RawQuery = query.Encode()
+
+	client := http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			fmt.Println("Error reading response:", err)
+			return
+		}
+		fmt.Println(string(body))
+	} else {
+		fmt.Println("Request failed with status:", resp.Status)
+	}
 }
 
-func addCard(token string) {
+func addDeck(token string, account_id int) {
 	// Use the token to authenticate requests
 	// Send a POST request to add a new card
 	// Get user input for card details
@@ -173,7 +262,13 @@ func addCard(token string) {
 }
 
 func logout() {
-	// Delete the token file
-	_ = os.Remove(tokenFile)
+	tokenPath := getTokenFilePath()
+
+	err := os.Remove(tokenPath)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
 	fmt.Println("Logged out.")
 }
