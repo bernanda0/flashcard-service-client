@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -79,7 +78,6 @@ func checkAndRenewToken(tokenResponse *TokenResponse) error {
 				return err
 			}
 
-			fmt.Println("Token renewed.")
 		} else {
 			return errors.New("token renewal failed with status: " + resp.Status)
 		}

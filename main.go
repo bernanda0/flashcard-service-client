@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 )
 
 const (
@@ -11,67 +13,68 @@ const (
 )
 
 func main() {
+	defer waitForAnyKey()
 	for {
-		fmt.Println("Welcome to the flash card app!")
-
 		token, err := readTokenFromFile()
-		if err != nil {
-			fmt.Println("[You're not authenticated. Please signup/login]")
-			fmt.Println("1. Signup")
-			fmt.Println("2. Login")
-			fmt.Println("3. Exit")
-
-			var choice int
-			fmt.Print("Enter your choice: ")
-			_, err := fmt.Scanln(&choice)
-			if err != nil {
-				fmt.Println("Invalid input. Please enter a number.")
-				continue
-			}
-
+		if err != nil { // todo checking the token file, because it can be exploited
+			choice := printLoginMenu()
 			switch choice {
 			case 1:
-				if signup() {
-					continue
-				}
+				login()
 				continue
 			case 2:
-				if login() {
-					continue
-				}
+				signup()
 				continue
 			case 3:
-				fmt.Println("Goodbye!")
+				exit()
 				return
 			default:
-				fmt.Println("Invalid choice. Please select a valid option.")
+				printError("Invalid choice. Please select a valid option.")
+				waitForAnyKey()
+				continue
 			}
 		}
 
 		// Display menu and handle user actions
-		displayMenu()
-		var choice int
-		fmt.Print("Enter your choice: ")
-		_, err = fmt.Scanln(&choice)
-		if err != nil {
-			fmt.Println("Invalid input. Please enter a number.")
-			continue
-		}
-
+		choice := printMainMenu()
 		switch choice {
 		case 1:
-			listDecks(token, token.UserID)
+			for {
+				decks := listDecks(token, token.UserID)
+				choice := displayDecks(&decks)
+				if choice == 0 {
+					break
+				} else if choice != -1 {
+					for {
+						deck_id := decks[choice-1].DeckID
+						cards := listCards(token, deck_id)
+						choice := displayCards(&cards)
+						if choice == 0 {
+							addCard(token, deck_id)
+							continue
+						} else {
+							break
+						}
+					}
+
+				}
+			}
 		case 2:
-			addDeck(token.AccessToken, token.UserID)
+			addDeck(token, token.UserID)
 		case 3:
 			logout()
-			fmt.Println("Goodbye!")
-			return
+			continue
 		case 4:
-			fmt.Println("Goodbye!")
+			exit()
 			return
 		default:
 			fmt.Println("Invalid choice. Please select a valid option.")
 		}
 	}
+}
+
+func waitForAnyKey() {
+	fmt.Println("\nPress any key to continue...")
+	reader := bufio.NewReader(os.Stdin)
+	_, _ = reader.ReadByte() // Read a single byte (any key)
 }

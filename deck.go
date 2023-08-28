@@ -1,24 +1,26 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"strconv"
 )
 
-func listDecks(token *TokenResponse, accountID int) {
+func listDecks(token *TokenResponse, accountID int) []DeckResponse {
+	defer waitForAnyKey()
 	err := checkAndRenewToken(token)
 	if err != nil {
-		fmt.Println("Error renewing token")
-		return
+		printError("Error renewing token")
+		return nil
 	}
 
 	url := baseURL + "/deck/getAll"
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		fmt.Println("Error creating request:", err)
-		return
+		return nil
 	}
 
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
@@ -29,24 +31,28 @@ func listDecks(token *TokenResponse, accountID int) {
 	client := http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		printError(err.Error())
+		return nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusOK {
-		body, err := ioutil.ReadAll(resp.Body)
+		var decks []DeckResponse
+		err := json.NewDecoder(resp.Body).Decode(&decks)
 		if err != nil {
-			fmt.Println("Error reading response:", err)
-			return
+			printError(err.Error())
+			return nil
 		}
-		fmt.Println(string(body))
-	} else {
-		fmt.Println("Request failed with status:", resp.Status)
+		printSuccess("Success fetching the decks")
+		return decks
 	}
+
+	body, _ := ioutil.ReadAll(resp.Body)
+	printError("Fetching decks failed due to " + string(body))
+	return nil
 }
 
-func addDeck(token string, account_id int) {
+func addDeck(token *TokenResponse, accountID int) {
 	// Use the token to authenticate requests
 	// Send a POST request to add a new card
 	// Get user input for card details

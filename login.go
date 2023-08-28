@@ -3,18 +3,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 )
 
-func login() bool {
-	var email, password string
-	fmt.Print("Email: ")
-	fmt.Scanln(&email)
-	fmt.Print("Password: ")
-	fmt.Scanln(&password)
+func login() {
+	defer waitForAnyKey()
+	email, password := loginForm()
 
 	// Create a URL-encoded payload
 	payload := url.Values{}
@@ -25,28 +23,29 @@ func login() bool {
 	// Send the authentication request
 	resp, err := http.Post(baseURL+"/auth/login", "application/x-www-form-urlencoded", strings.NewReader(payloadStr))
 	if err != nil {
-		fmt.Println("Error:", err)
-		return false
+		printError(err.Error())
+		return
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode == http.StatusCreated {
 		var tokenResponse TokenResponse
 		err := json.NewDecoder(resp.Body).Decode(&tokenResponse)
 		if err != nil {
-			fmt.Println("Error decoding response:", err)
-			return false
+			printError(err.Error())
+			return
 		}
 
 		if tokenResponse.AccessToken != "" {
-			saveTokenToFile(tokenResponse)
-			fmt.Println("Login successful.")
-			return true
+			err := saveTokenToFile(tokenResponse)
+			if err == nil {
+				printSuccess("Login success")
+				return
+			}
 		}
-	} else {
-		fmt.Println("Login failed.")
-		return false
 	}
-	return false
+	body, _ := ioutil.ReadAll(resp.Body)
+	printError("Login failed due to " + string(body))
 }
 
 func signup() bool {
@@ -79,7 +78,6 @@ func signup() bool {
 		fmt.Println("Sign Up failed.")
 		return false
 	}
-	return false
 }
 
 func logout() {
